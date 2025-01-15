@@ -2,18 +2,23 @@ import io
 import threading
 import time
 
+from dbt.adapters.factory import get_adapter
+from dbt.artifacts.schemas.run import RunResult, RunStatus
+from dbt.context.providers import generate_runtime_model_context
 from dbt.contracts.graph.nodes import SeedNode
-from dbt.contracts.results import RunResult, RunStatus
-from dbt.events.base_types import EventLevel
-from dbt.events.functions import fire_event
-from dbt.events.types import ShowNode, Note
-from dbt.exceptions import DbtRuntimeError
-from dbt.task.compile import CompileTask, CompileRunner
+from dbt.events.types import ShowNode
+from dbt.flags import get_flags
+from dbt.task.base import ConfiguredTask
+from dbt.task.compile import CompileRunner, CompileTask
 from dbt.task.seed import SeedRunner
+from dbt_common.events.base_types import EventLevel
+from dbt_common.events.functions import fire_event
+from dbt_common.events.types import Note
+from dbt_common.exceptions import DbtRuntimeError
 
 
 class ShowRunner(CompileRunner):
-    def __init__(self, config, adapter, node, node_index, num_nodes):
+    def __init__(self, config, adapter, node, node_index, num_nodes) -> None:
         super().__init__(config, adapter, node, node_index, num_nodes)
         self.run_ephemeral_models = True
 
@@ -23,14 +28,21 @@ class ShowRunner(CompileRunner):
         # Allow passing in -1 (or any negative number) to get all rows
         limit = None if self.config.args.limit < 0 else self.config.args.limit
 
-        if "sql_header" in compiled_node.unrendered_config:
-            compiled_node.compiled_code = (
-                compiled_node.unrendered_config["sql_header"] + compiled_node.compiled_code
-            )
-
-        adapter_response, execute_result = self.adapter.execute(
-            compiled_node.compiled_code, fetch=True, limit=limit
+        model_context = generate_runtime_model_context(compiled_node, self.config, manifest)
+        compiled_node.compiled_code = self.adapter.execute_macro(
+            macro_name="get_show_sql",
+            macro_resolver=manifest,
+            context_override=model_context,
+            kwargs={
+                "compiled_code": model_context["compiled_code"],
+                "sql_header": model_context["config"].get("sql_header"),
+                "limit": limit,
+            },
         )
+        adapter_response, execute_result = self.adapter.execute(
+            compiled_node.compiled_code, fetch=True
+        )
+
         end_time = time.time()
 
         return RunResult(
@@ -43,6 +55,7 @@ class ShowRunner(CompileRunner):
             adapter_response=adapter_response.to_dict(),
             agate_table=execute_result,
             failures=None,
+            batch_results=None,
         )
 
 
@@ -58,7 +71,7 @@ class ShowTask(CompileTask):
         else:
             return ShowRunner
 
-    def task_end_messages(self, results):
+    def task_end_messages(self, results) -> None:
         is_inline = bool(getattr(self.args, "inline", None))
 
         if is_inline:
@@ -96,10 +109,11 @@ class ShowTask(CompileTask):
                     is_inline=is_inline,
                     output_format=self.args.output,
                     unique_id=result.node.unique_id,
+                    quiet=get_flags().QUIET,
                 )
             )
 
-    def _handle_result(self, result):
+    def _handle_result(self, result) -> None:
         super()._handle_result(result)
 
         if (
@@ -108,3 +122,29 @@ class ShowTask(CompileTask):
             and (self.args.select or getattr(self.args, "inline", None))
         ):
             self.node_results.append(result)
+
+
+class ShowTaskDirect(ConfiguredTask):
+    def run(self):
+        adapter = get_adapter(self.config)
+        with adapter.connection_named("show", should_release_connection=False):
+            response, table = adapter.execute(
+                self.args.inline_direct, fetch=True, limit=self.args.limit
+            )
+
+            output = io.StringIO()
+            if self.args.output == "json":
+                table.to_json(path=output)
+            else:
+                table.print_table(output=output, max_rows=None)
+
+            fire_event(
+                ShowNode(
+                    node_name="direct-query",
+                    preview=output.getvalue(),
+                    is_inline=True,
+                    output_format=self.args.output,
+                    unique_id="direct-query",
+                    quiet=get_flags().QUIET,
+                )
+            )

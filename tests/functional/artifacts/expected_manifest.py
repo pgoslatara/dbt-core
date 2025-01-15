@@ -1,7 +1,8 @@
 import hashlib
-import dbt
 import os
 from unittest.mock import ANY
+
+import dbt
 from dbt.tests.util import AnyStringWith
 
 # This produces an "expected manifest", with a number of the fields
@@ -36,7 +37,13 @@ def get_rendered_model_config(**updates):
         "packages": [],
         "incremental_strategy": None,
         "docs": {"node_color": None, "show": True},
-        "contract": {"enforced": False},
+        "contract": {"enforced": False, "alias_types": True},
+        "access": "protected",
+        "event_time": None,
+        "lookback": 1,
+        "batch_size": None,
+        "begin": None,
+        "concurrent_batches": None,
     }
     result.update(updates)
     return result
@@ -71,7 +78,12 @@ def get_rendered_seed_config(**updates):
         "packages": [],
         "incremental_strategy": None,
         "docs": {"node_color": None, "show": True},
-        "contract": {"enforced": False},
+        "contract": {"enforced": False, "alias_types": True},
+        "event_time": None,
+        "lookback": 1,
+        "batch_size": None,
+        "begin": None,
+        "concurrent_batches": None,
     }
     result.update(updates)
     return result
@@ -95,6 +107,14 @@ def get_rendered_snapshot_config(**updates):
         "post-hook": [],
         "column_types": {},
         "quoting": {},
+        "snapshot_meta_column_names": {
+            "dbt_valid_to": None,
+            "dbt_valid_from": None,
+            "dbt_updated_at": None,
+            "dbt_scd_id": None,
+            "dbt_is_deleted": None,
+        },
+        "dbt_valid_to_current": None,
         "tags": [],
         "persist_docs": {},
         "full_refresh": None,
@@ -111,7 +131,12 @@ def get_rendered_snapshot_config(**updates):
         "packages": [],
         "incremental_strategy": None,
         "docs": {"node_color": None, "show": True},
-        "contract": {"enforced": False},
+        "contract": {"enforced": False, "alias_types": True},
+        "event_time": None,
+        "lookback": 1,
+        "batch_size": None,
+        "begin": None,
+        "concurrent_batches": None,
     }
     result.update(updates)
     return result
@@ -131,6 +156,7 @@ def get_rendered_tst_config(**updates):
         "tags": [],
         "severity": "ERROR",
         "store_failures": None,
+        "store_failures_as": None,
         "warn_if": "!= 0",
         "error_if": "!= 0",
         "fail_calc": "count(*)",
@@ -277,9 +303,9 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "group": None,
                 "schema": my_schema_name,
                 "database": model_database,
-                "deferred": False,
                 "alias": "model",
                 "description": "The test model",
+                "primary_key": ["id"],
                 "columns": {
                     "id": {
                         "name": "id",
@@ -289,6 +315,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "first_name": {
                         "name": "first_name",
@@ -298,6 +325,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "email": {
                         "name": "email",
@@ -307,6 +335,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ip_address": {
                         "name": "ip_address",
@@ -316,6 +345,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "updated_at": {
                         "name": "updated_at",
@@ -325,9 +355,10 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "constraints": [],
                 "patch_path": "test://" + model_schema_yml_path,
                 "docs": {"node_color": None, "show": False},
@@ -340,6 +371,8 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "access": "protected",
                 "version": None,
                 "latest_version": None,
+                "time_spine": None,
+                "freshness": None,
             },
             "model.test.second_model": {
                 "compiled_path": os.path.join(compiled_model_path, "second_model.sql"),
@@ -370,9 +403,9 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "group": None,
                 "schema": alternate_schema,
                 "database": project.database,
-                "deferred": False,
                 "alias": "second_model",
                 "description": "The second test model",
+                "primary_key": [],
                 "columns": {
                     "id": {
                         "name": "id",
@@ -382,6 +415,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "first_name": {
                         "name": "first_name",
@@ -391,6 +425,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "email": {
                         "name": "email",
@@ -400,6 +435,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ip_address": {
                         "name": "ip_address",
@@ -409,6 +445,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "updated_at": {
                         "name": "updated_at",
@@ -418,9 +455,10 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "constraints": [],
                 "patch_path": "test://" + model_schema_yml_path,
                 "docs": {"node_color": None, "show": False},
@@ -433,6 +471,8 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "access": "protected",
                 "version": None,
                 "latest_version": None,
+                "time_spine": None,
+                "freshness": None,
             },
             "seed.test.seed": {
                 "build_path": None,
@@ -455,7 +495,6 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "schema": my_schema_name,
                 "database": project.database,
                 "alias": "seed",
-                "deferred": False,
                 "description": "The test seed",
                 "columns": {
                     "id": {
@@ -466,6 +505,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "first_name": {
                         "name": "first_name",
@@ -475,6 +515,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "email": {
                         "name": "email",
@@ -484,6 +525,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ip_address": {
                         "name": "ip_address",
@@ -493,6 +535,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "updated_at": {
                         "name": "updated_at",
@@ -502,6 +545,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "docs": {"node_color": None, "show": True},
@@ -528,7 +572,6 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                     "macros": ["macro.dbt.test_not_null", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.model"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.model",
                 "fqn": ["test", "not_null_model_id"],
@@ -563,7 +606,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 },
                 "checksum": {"name": "none", "checksum": ""},
                 "unrendered_config": unrendered_test_config,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
             },
             "snapshot.test.snapshot_seed": {
                 "alias": "snapshot_seed",
@@ -575,10 +618,9 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "compiled": True,
                 "compiled_code": ANY,
                 "config": snapshot_config,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "database": project.database,
                 "group": None,
-                "deferred": False,
                 "depends_on": {
                     "macros": [],
                     "nodes": ["seed.test.seed"],
@@ -624,13 +666,12 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "columns": {},
                 "config": test_config,
                 "group": None,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": ["macro.test.test_nothing", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.model"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.model",
                 "fqn": ["test", "test_nothing_model_"],
@@ -677,13 +718,12 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "columns": {},
                 "config": test_config,
                 "group": None,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": ["macro.dbt.test_unique", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.model"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.model",
                 "fqn": ["test", "unique_model_id"],
@@ -732,10 +772,12 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     }
                 },
                 "config": {
                     "enabled": True,
+                    "event_time": None,
                 },
                 "quoting": {
                     "database": None,
@@ -753,6 +795,7 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 },
                 "identifier": "seed",
                 "loaded_at_field": None,
+                "loaded_at_query": None,
                 "loader": "a_loader",
                 "meta": {},
                 "name": "my_table",
@@ -772,6 +815,8 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
                 "unique_id": "source.test.my_source.my_table",
                 "fqn": ["test", "my_source", "my_table"],
                 "unrendered_config": {},
+                "unrendered_database": None,
+                "unrendered_schema": "{{ var('test_schema') }}",
             },
         },
         "exposures": {
@@ -888,6 +933,8 @@ def expected_seeded_manifest(project, model_database=None, quote_model=False):
         },
         "disabled": {},
         "semantic_models": {},
+        "unit_tests": {},
+        "saved_queries": {},
     }
 
 
@@ -925,8 +972,8 @@ def expected_references_manifest(project):
                     "nodes": ["source.test.my_source.my_table"],
                 },
                 "deprecation_date": None,
-                "deferred": False,
                 "description": "",
+                "primary_key": [],
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "ephemeral_copy"],
                 "group": None,
@@ -948,7 +995,7 @@ def expected_references_manifest(project):
                 "unique_id": "model.test.ephemeral_copy",
                 "compiled": True,
                 "compiled_code": ANY,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "extra_ctes_injected": True,
                 "extra_ctes": [],
                 "checksum": checksum_file(ephemeral_copy_path),
@@ -957,6 +1004,8 @@ def expected_references_manifest(project):
                 "version": None,
                 "latest_version": None,
                 "constraints": [],
+                "time_spine": None,
+                "freshness": None,
             },
             "model.test.ephemeral_summary": {
                 "alias": "ephemeral_summary",
@@ -972,6 +1021,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ct": {
                         "description": "The number of instances of the first name",
@@ -981,18 +1031,19 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "config": get_rendered_model_config(materialized="table", group="test_group"),
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": [],
                     "nodes": ["model.test.ephemeral_copy"],
                 },
                 "deprecation_date": None,
-                "deferred": False,
                 "description": "A summmary table of the ephemeral copy of the seed data",
+                "primary_key": [],
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "ephemeral_summary"],
                 "group": "test_group",
@@ -1026,6 +1077,8 @@ def expected_references_manifest(project):
                 "version": None,
                 "latest_version": None,
                 "constraints": [],
+                "time_spine": None,
+                "freshness": None,
             },
             "model.test.view_summary": {
                 "alias": "view_summary",
@@ -1041,6 +1094,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ct": {
                         "description": "The number of instances of the first name",
@@ -1050,18 +1104,19 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "config": get_rendered_model_config(),
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "database": project.database,
                 "depends_on": {
                     "macros": [],
                     "nodes": ["model.test.ephemeral_summary"],
                 },
                 "deprecation_date": None,
-                "deferred": False,
                 "description": "A view of the summary of the ephemeral copy of the seed data",
+                "primary_key": [],
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "view_summary"],
                 "group": None,
@@ -1091,6 +1146,8 @@ def expected_references_manifest(project):
                 "version": None,
                 "latest_version": None,
                 "constraints": [],
+                "time_spine": None,
+                "freshness": None,
             },
             "seed.test.seed": {
                 "alias": "seed",
@@ -1105,6 +1162,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "first_name": {
                         "name": "first_name",
@@ -1114,6 +1172,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "email": {
                         "name": "email",
@@ -1123,6 +1182,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ip_address": {
                         "name": "ip_address",
@@ -1132,6 +1192,7 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "updated_at": {
                         "name": "updated_at",
@@ -1141,10 +1202,10 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "config": get_rendered_seed_config(),
-                "deferred": False,
                 "depends_on": {"macros": []},
                 "description": "The test seed",
                 "docs": {"node_color": None, "show": True},
@@ -1177,9 +1238,8 @@ def expected_references_manifest(project):
                 "compiled": True,
                 "compiled_code": ANY,
                 "config": get_rendered_snapshot_config(target_schema=alternate_schema),
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "database": model_database,
-                "deferred": False,
                 "depends_on": {"macros": [], "nodes": ["seed.test.seed"]},
                 "description": "",
                 "docs": {"node_color": None, "show": True},
@@ -1221,10 +1281,12 @@ def expected_references_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     }
                 },
                 "config": {
                     "enabled": True,
+                    "event_time": None,
                 },
                 "quoting": {
                     "database": False,
@@ -1243,6 +1305,7 @@ def expected_references_manifest(project):
                 },
                 "identifier": "seed",
                 "loaded_at_field": None,
+                "loaded_at_query": None,
                 "loader": "a_loader",
                 "meta": {},
                 "name": "my_table",
@@ -1260,6 +1323,8 @@ def expected_references_manifest(project):
                 "unique_id": "source.test.my_source.my_table",
                 "fqn": ["test", "my_source", "my_table"],
                 "unrendered_config": {},
+                "unrendered_database": None,
+                "unrendered_schema": "{{ var('test_schema') }}",
             },
         },
         "exposures": {
@@ -1447,6 +1512,8 @@ def expected_references_manifest(project):
             }
         },
         "semantic_models": {},
+        "unit_tests": {},
+        "saved_queries": {},
     }
 
 
@@ -1487,6 +1554,7 @@ def expected_versions_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "ct": {
                         "description": "The number of instances of the first name",
@@ -1496,6 +1564,7 @@ def expected_versions_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "config": get_rendered_model_config(
@@ -1506,8 +1575,8 @@ def expected_versions_manifest(project):
                 "constraints": [],
                 "sources": [],
                 "depends_on": {"macros": [], "nodes": []},
-                "deferred": False,
                 "description": "A versioned model",
+                "primary_key": ["count", "first_name"],
                 "deprecation_date": ANY,
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "versioned_model", "v1"],
@@ -1532,7 +1601,7 @@ def expected_versions_manifest(project):
                 "unique_id": "model.test.versioned_model.v1",
                 "compiled": True,
                 "compiled_code": ANY,
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "extra_ctes_injected": True,
                 "extra_ctes": [],
                 "checksum": checksum_file(versioned_model_v1_path),
@@ -1544,6 +1613,8 @@ def expected_versions_manifest(project):
                 "access": "protected",
                 "version": 1,
                 "latest_version": 2,
+                "time_spine": None,
+                "freshness": None,
             },
             "model.test.versioned_model.v2": {
                 "alias": "versioned_model_v2",
@@ -1559,6 +1630,7 @@ def expected_versions_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                     "extra": {
                         "description": "",
@@ -1568,17 +1640,18 @@ def expected_versions_manifest(project):
                         "quote": None,
                         "tags": [],
                         "constraints": [],
+                        "granularity": None,
                     },
                 },
                 "config": get_rendered_model_config(
                     materialized="view", group="test_group", meta={"size": "large", "color": "red"}
                 ),
                 "constraints": [],
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {"macros": [], "nodes": []},
-                "deferred": False,
                 "description": "A versioned model",
+                "primary_key": ["first_name"],
                 "deprecation_date": None,
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "versioned_model", "v2"],
@@ -1612,6 +1685,8 @@ def expected_versions_manifest(project):
                 "access": "protected",
                 "version": 2,
                 "latest_version": 2,
+                "time_spine": None,
+                "freshness": None,
             },
             "model.test.ref_versioned_model": {
                 "alias": "ref_versioned_model",
@@ -1621,7 +1696,7 @@ def expected_versions_manifest(project):
                 "columns": {},
                 "config": get_rendered_model_config(),
                 "constraints": [],
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "database": project.database,
                 "depends_on": {
                     "macros": [],
@@ -1631,8 +1706,8 @@ def expected_versions_manifest(project):
                     ],
                 },
                 "deprecation_date": None,
-                "deferred": False,
                 "description": "",
+                "primary_key": [],
                 "docs": {"node_color": None, "show": True},
                 "fqn": ["test", "ref_versioned_model"],
                 "group": None,
@@ -1669,6 +1744,8 @@ def expected_versions_manifest(project):
                 "access": "protected",
                 "version": None,
                 "latest_version": None,
+                "time_spine": None,
+                "freshness": None,
             },
             "test.test.unique_versioned_model_v1_first_name.6138195dec": {
                 "alias": "unique_versioned_model_v1_first_name",
@@ -1682,13 +1759,12 @@ def expected_versions_manifest(project):
                 "columns": {},
                 "config": test_config,
                 "group": "test_group",
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": ["macro.dbt.test_unique", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.versioned_model.v1"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.versioned_model",
                 "fqn": ["test", "unique_versioned_model_v1_first_name"],
@@ -1736,13 +1812,12 @@ def expected_versions_manifest(project):
                 "columns": {},
                 "config": test_config,
                 "group": "test_group",
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": ["macro.dbt.test_unique", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.versioned_model.v1"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.versioned_model",
                 "fqn": ["test", "unique_versioned_model_v1_count"],
@@ -1790,13 +1865,12 @@ def expected_versions_manifest(project):
                 "columns": {},
                 "config": test_config,
                 "group": "test_group",
-                "contract": {"checksum": None, "enforced": False},
+                "contract": {"checksum": None, "enforced": False, "alias_types": True},
                 "sources": [],
                 "depends_on": {
                     "macros": ["macro.dbt.test_unique", "macro.dbt.get_where_subquery"],
                     "nodes": ["model.test.versioned_model.v2"],
                 },
-                "deferred": False,
                 "description": "",
                 "file_key_name": "models.versioned_model",
                 "fqn": ["test", "unique_versioned_model_v2_first_name"],
@@ -1926,4 +2000,6 @@ def expected_versions_manifest(project):
         "disabled": {},
         "macros": {},
         "semantic_models": {},
+        "unit_tests": {},
+        "saved_queries": {},
     }

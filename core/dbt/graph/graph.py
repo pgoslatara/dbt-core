@@ -1,8 +1,10 @@
-from typing import Set, Iterable, Iterator, Optional, NewType
+from functools import partial
 from itertools import product
+from typing import Iterable, Iterator, NewType, Optional, Set
+
 import networkx as nx  # type: ignore
 
-from dbt.exceptions import DbtInternalError
+from dbt_common.exceptions import DbtInternalError
 
 UniqueId = NewType("UniqueId", str)
 
@@ -12,8 +14,8 @@ class Graph:
     and how they interact with the graph.
     """
 
-    def __init__(self, graph):
-        self.graph = graph
+    def __init__(self, graph) -> None:
+        self.graph: nx.DiGraph = graph
 
     def nodes(self) -> Set[UniqueId]:
         return set(self.graph.nodes())
@@ -42,15 +44,13 @@ class Graph:
         return {child for _, child in nx.bfs_edges(filtered_graph, node, depth_limit=max_depth)}
 
     def exclude_edge_type(self, edge_type_to_exclude):
-        return nx.restricted_view(
+        return nx.subgraph_view(
             self.graph,
-            nodes=[],
-            edges=(
-                (a, b)
-                for a, b in self.graph.edges
-                if self.graph[a][b].get("edge_type") == edge_type_to_exclude
-            ),
+            filter_edge=partial(self.filter_edges_by_type, edge_type=edge_type_to_exclude),
         )
+
+    def filter_edges_by_type(self, first_node, second_node, edge_type):
+        return self.graph.get_edge_data(first_node, second_node).get("edge_type") != edge_type
 
     def select_childrens_parents(self, selected: Set[UniqueId]) -> Set[UniqueId]:
         ancestors_for = self.select_children(selected) | selected
@@ -59,18 +59,52 @@ class Graph:
     def select_children(
         self, selected: Set[UniqueId], max_depth: Optional[int] = None
     ) -> Set[UniqueId]:
-        descendants: Set[UniqueId] = set()
-        for node in selected:
-            descendants.update(self.descendants(node, max_depth))
-        return descendants
+        """Returns all nodes which are descendants of the 'selected' set.
+        Nodes in the 'selected' set are counted as children only if
+        they are descendants of other nodes in the 'selected' set."""
+        children: Set[UniqueId] = set()
+        i = 0
+        while len(selected) > 0 and (max_depth is None or i < max_depth):
+            next_layer: Set[UniqueId] = set()
+            for node in selected:
+                next_layer.update(
+                    iter(
+                        e[1]
+                        for e in self.graph.out_edges(node)
+                        if e[1] not in children
+                        and self.filter_edges_by_type(e[0], e[1], "parent_test")
+                    )
+                )
+            children.update(next_layer)
+            selected = next_layer
+            i += 1
+
+        return children
 
     def select_parents(
         self, selected: Set[UniqueId], max_depth: Optional[int] = None
     ) -> Set[UniqueId]:
-        ancestors: Set[UniqueId] = set()
-        for node in selected:
-            ancestors.update(self.ancestors(node, max_depth))
-        return ancestors
+        """Returns all nodes which are ancestors of the 'selected' set.
+        Nodes in the 'selected' set are counted as parents only if
+        they are ancestors of other nodes in the 'selected' set."""
+        parents: Set[UniqueId] = set()
+        i = 0
+        while len(selected) > 0 and (max_depth is None or i < max_depth):
+            next_layer: Set[UniqueId] = set()
+            for node in selected:
+                next_layer.update(
+                    iter(
+                        e[0]
+                        for e in self.graph.in_edges(node)
+                        if e[0] not in parents
+                        and self.filter_edges_by_type(e[0], e[1], "parent_test")
+                    )
+                )
+            parents.update(next_layer)
+            selected = next_layer
+            i += 1
+
+        return parents
 
     def select_successors(self, selected: Set[UniqueId]) -> Set[UniqueId]:
         successors: Set[UniqueId] = set()
@@ -84,10 +118,10 @@ class Graph:
         removed nodes are preserved as explicit new edges.
         """
 
-        new_graph = self.graph.copy()
-        include_nodes = set(selected)
+        new_graph: nx.DiGraph = self.graph.copy()
+        include_nodes: Set[UniqueId] = set(selected)
 
-        still_removing = True
+        still_removing: bool = True
         while still_removing:
             nodes_to_remove = list(
                 node
@@ -130,6 +164,8 @@ class Graph:
         return Graph(new_graph)
 
     def subgraph(self, nodes: Iterable[UniqueId]) -> "Graph":
+        # Take the original networkx graph and return a subgraph containing only
+        # the selected unique_id nodes.
         return Graph(self.graph.subgraph(nodes))
 
     def get_dependent_nodes(self, node: UniqueId):

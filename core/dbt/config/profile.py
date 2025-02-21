@@ -1,25 +1,23 @@
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
-import os
 
-from dbt.dataclass_schema import ValidationError
-
-from dbt.flags import get_flags
-from dbt.clients.system import load_file_contents
+from dbt.adapters.contracts.connection import Credentials, HasCredentials
 from dbt.clients.yaml_helper import load_yaml_text
-from dbt.contracts.connection import Credentials, HasCredentials
-from dbt.contracts.project import ProfileConfig, UserConfig
+from dbt.contracts.project import ProfileConfig
+from dbt.events.types import MissingProfileTarget
 from dbt.exceptions import (
     CompilationError,
     DbtProfileError,
     DbtProjectError,
-    DbtValidationError,
     DbtRuntimeError,
     ProfileConfigError,
 )
-from dbt.events.types import MissingProfileTarget
-from dbt.events.functions import fire_event
-from dbt.utils import coerce_dict_str
+from dbt.flags import get_flags
+from dbt_common.clients.system import load_file_contents
+from dbt_common.dataclass_schema import ValidationError
+from dbt_common.events.functions import fire_event
+from dbt_common.exceptions import DbtValidationError
 
 from .renderer import ProfileRenderer
 
@@ -51,19 +49,6 @@ def read_profile(profiles_dir: str) -> Dict[str, Any]:
     return {}
 
 
-def read_user_config(directory: str) -> UserConfig:
-    try:
-        profile = read_profile(directory)
-        if profile:
-            user_config = coerce_dict_str(profile.get("config", {}))
-            if user_config is not None:
-                UserConfig.validate(user_config)
-                return UserConfig.from_dict(user_config)
-    except (DbtRuntimeError, ValidationError):
-        pass
-    return UserConfig()
-
-
 # The Profile class is included in RuntimeConfig, so any attribute
 # additions must also be set where the RuntimeConfig class is created
 # `init=False` is a workaround for https://bugs.python.org/issue45081
@@ -71,28 +56,31 @@ def read_user_config(directory: str) -> UserConfig:
 class Profile(HasCredentials):
     profile_name: str
     target_name: str
-    user_config: UserConfig
     threads: int
     credentials: Credentials
     profile_env_vars: Dict[str, Any]
+    log_cache_events: bool
+    secondary_profiles: Dict[str, "Profile"]
 
     def __init__(
         self,
         profile_name: str,
         target_name: str,
-        user_config: UserConfig,
         threads: int,
         credentials: Credentials,
-    ):
+    ) -> None:
         """Explicitly defining `__init__` to work around bug in Python 3.9.7
         https://bugs.python.org/issue45081
         """
         self.profile_name = profile_name
         self.target_name = target_name
-        self.user_config = user_config
         self.threads = threads
         self.credentials = credentials
         self.profile_env_vars = {}  # never available on init
+        self.log_cache_events = (
+            get_flags().LOG_CACHE_EVENTS
+        )  # never available on init, set for adapter instantiation via AdapterRequiredConfig
+        self.secondary_profiles = {}
 
     def to_profile_info(self, serialize_credentials: bool = False) -> Dict[str, Any]:
         """Unlike to_project_config, this dict is not a mirror of any existing
@@ -106,12 +94,10 @@ class Profile(HasCredentials):
         result = {
             "profile_name": self.profile_name,
             "target_name": self.target_name,
-            "user_config": self.user_config,
             "threads": self.threads,
             "credentials": self.credentials,
         }
         if serialize_credentials:
-            result["user_config"] = self.user_config.to_dict(omit_none=True)
             result["credentials"] = self.credentials.to_dict(omit_none=True)
         return result
 
@@ -124,7 +110,6 @@ class Profile(HasCredentials):
                 "name": self.target_name,
                 "target_name": self.target_name,
                 "profile_name": self.profile_name,
-                "config": self.user_config.to_dict(omit_none=True),
             }
         )
         return target
@@ -246,7 +231,6 @@ defined in your profiles.yml file. You can find profiles.yml here:
         threads: int,
         profile_name: str,
         target_name: str,
-        user_config: Optional[Dict[str, Any]] = None,
     ) -> "Profile":
         """Create a profile from an existing set of Credentials and the
         remaining information.
@@ -255,20 +239,13 @@ defined in your profiles.yml file. You can find profiles.yml here:
         :param threads: The number of threads to use for connections.
         :param profile_name: The profile name used for this profile.
         :param target_name: The target name used for this profile.
-        :param user_config: The user-level config block from the
-            raw profiles, if specified.
         :raises DbtProfileError: If the profile is invalid.
         :returns: The new Profile object.
         """
-        if user_config is None:
-            user_config = {}
-        UserConfig.validate(user_config)
-        user_config_obj: UserConfig = UserConfig.from_dict(user_config)
 
         profile = cls(
             profile_name=profile_name,
             target_name=target_name,
-            user_config=user_config_obj,
             threads=threads,
             credentials=credentials,
         )
@@ -282,6 +259,7 @@ defined in your profiles.yml file. You can find profiles.yml here:
         profile_name: str,
         target_override: Optional[str],
         renderer: ProfileRenderer,
+        is_secondary: bool = False,
     ) -> Tuple[str, Dict[str, Any]]:
         """This is a containment zone for the hateful way we're rendering
         profiles.
@@ -298,6 +276,12 @@ defined in your profiles.yml file. You can find profiles.yml here:
         elif "target" in raw_profile:
             # render the target if it was parsed from yaml
             target_name = renderer.render_value(raw_profile["target"])
+        elif is_secondary and len(raw_profile.get("outputs", [])) == 1:
+            # if we only have one target, we can infer the target name
+            # currently, this is only used for secondary profiles
+            target_name = next(iter(raw_profile["outputs"]))
+            # the event name is slightly misleading, but the message indicates that we inferred the target name for a profile
+            fire_event(MissingProfileTarget(profile_name=profile_name, target_name=target_name))
         else:
             target_name = "default"
             fire_event(MissingProfileTarget(profile_name=profile_name, target_name=target_name))
@@ -316,9 +300,9 @@ defined in your profiles.yml file. You can find profiles.yml here:
         raw_profile: Dict[str, Any],
         profile_name: str,
         renderer: ProfileRenderer,
-        user_config: Optional[Dict[str, Any]] = None,
         target_override: Optional[str] = None,
         threads_override: Optional[int] = None,
+        is_secondary: bool = False,
     ) -> "Profile":
         """Create a profile from its raw profile information.
 
@@ -328,8 +312,6 @@ defined in your profiles.yml file. You can find profiles.yml here:
             disk as yaml and its values rendered with jinja.
         :param profile_name: The profile name used.
         :param renderer: The config renderer.
-        :param user_config: The global config for the user, if it
-            was present.
         :param target_override: The target to use, if provided on
             the command line.
         :param threads_override: The thread count to use, if
@@ -338,13 +320,15 @@ defined in your profiles.yml file. You can find profiles.yml here:
             target could not be found
         :returns: The new Profile object.
         """
-        # user_config is not rendered.
-        if user_config is None:
-            user_config = raw_profile.get("config")
         # TODO: should it be, and the values coerced to bool?
         target_name, profile_data = cls.render_profile(
-            raw_profile, profile_name, target_override, renderer
+            raw_profile, profile_name, target_override, renderer, is_secondary=is_secondary
         )
+
+        if is_secondary and "secondary_profiles" in profile_data:
+            raise DbtProfileError(
+                f"Secondary profile '{profile_name}' cannot have nested secondary profiles"
+            )
 
         # valid connections never include the number of threads, but it's
         # stored on a per-connection level in the raw configs
@@ -356,13 +340,30 @@ defined in your profiles.yml file. You can find profiles.yml here:
             profile_data, profile_name, target_name
         )
 
-        return cls.from_credentials(
+        profile = cls.from_credentials(
             credentials=credentials,
             profile_name=profile_name,
             target_name=target_name,
             threads=threads,
-            user_config=user_config,
         )
+
+        for p in profile_data.pop("secondary_profiles", []):
+            for secondary_profile_name, secondary_raw_profile in p.items():
+                if secondary_profile_name in profile.secondary_profiles:
+                    raise DbtProfileError(
+                        f"Secondary profile '{secondary_profile_name}' is already defined"
+                    )
+
+                profile.secondary_profiles[secondary_profile_name] = cls.from_raw_profile_info(
+                    secondary_raw_profile,
+                    secondary_profile_name,
+                    renderer,
+                    target_override=target_override,
+                    threads_override=threads_override,
+                    is_secondary=True,
+                )
+
+        return profile
 
     @classmethod
     def from_raw_profiles(
@@ -396,13 +397,11 @@ defined in your profiles.yml file. You can find profiles.yml here:
         if not raw_profile:
             msg = f"Profile {profile_name} in profiles.yml is empty"
             raise DbtProfileError(INVALID_PROFILE_MESSAGE.format(error_string=msg))
-        user_config = raw_profiles.get("config")
 
         return cls.from_raw_profile_info(
             raw_profile=raw_profile,
             profile_name=profile_name,
             renderer=renderer,
-            user_config=user_config,
             target_override=target_override,
             threads_override=threads_override,
         )

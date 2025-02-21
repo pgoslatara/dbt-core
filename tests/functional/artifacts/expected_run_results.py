@@ -1,4 +1,5 @@
 from unittest.mock import ANY
+
 from dbt.tests.util import AnyFloat
 
 
@@ -17,6 +18,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -27,6 +32,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -37,6 +46,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": None,
+            "compiled_code": ANY,
+            "relation_name": None,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -47,6 +60,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -57,6 +74,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": None,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -67,6 +88,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": None,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -77,6 +102,10 @@ def expected_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": None,
+            "batch_results": None,
         },
     ]
 
@@ -92,6 +121,10 @@ def expected_references_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -102,6 +135,10 @@ def expected_references_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -112,6 +149,10 @@ def expected_references_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": None,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -122,6 +163,10 @@ def expected_references_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
     ]
 
@@ -137,6 +182,10 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -147,6 +196,10 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -157,6 +210,10 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -167,6 +224,10 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -177,6 +238,10 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
         {
             "status": "success",
@@ -187,5 +252,9 @@ def expected_versions_run_results():
             "thread_id": ANY,
             "timing": [ANY, ANY],
             "failures": ANY,
+            "compiled": True,
+            "compiled_code": ANY,
+            "relation_name": ANY,
+            "batch_results": None,
         },
     ]

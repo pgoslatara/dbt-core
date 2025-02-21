@@ -1,5 +1,6 @@
 models__sample_model = """select 1 as id, baz as foo"""
 models__second_model = """select 1 as id, 2 as bar"""
+models__thread_model = """select idx as id"""
 
 models__union_model = """
 select foo + bar as sum3 from {{ ref('sample_model') }}
@@ -11,7 +12,7 @@ models:
   - name: sample_model
     columns:
       - name: foo
-        tests:
+        data_tests:
           - accepted_values:
               values: [3]
               quote: false
@@ -20,7 +21,7 @@ models:
   - name: second_model
     columns:
       - name: bar
-        tests:
+        data_tests:
           - accepted_values:
               values: [3]
               quote: false
@@ -29,7 +30,7 @@ models:
   - name: union_model
     columns:
       - name: sum3
-        tests:
+        data_tests:
           - accepted_values:
               values: [3]
               quote: false
@@ -44,4 +45,27 @@ macros__alter_timezone_sql = """
 {% do run_query(sql) %}
 {% do log("Timezone set to: " + timezone, info=True) %}
 {% endmacro %}
+"""
+
+simple_model = """
+select null as id
+"""
+
+simple_schema = """
+models:
+  - name: some_model
+    columns:
+      - name: id
+        data_tests:
+          - not_null
+"""
+
+schema_test_thread_yml = """
+models:
+  - name: thread_model
+    columns:
+      - name: id
+        data_tests:
+          - not_null
+
 """

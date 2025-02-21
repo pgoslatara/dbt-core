@@ -88,6 +88,14 @@ metrics:
       metrics:
         - average_tenure
       expr: "average_tenure + 1"
+
+  - name: tenured_people
+    label: Tenured People
+    description: People who have been here more than 1 year
+    type: simple
+    type_params:
+      measure: people
+    filter: "{{ Metric('collective_tenure', ['id']) }} > 2"
 """
 
 metricflow_time_spine_sql = """
@@ -105,8 +113,10 @@ metrics:
     type: simple
     type_params:
       measure: people
-    meta:
-        my_meta: 'testing'
+    time_granularity: month
+    config:
+      meta:
+        my_meta_config: 'config'
 
   - name: collective_tenure
     label: "Collective tenure"
@@ -116,6 +126,63 @@ metrics:
       measure:
         name: years_tenure
         filter: "{{ Dimension('id__loves_dbt') }} is true"
+        join_to_timespine: true
+        fill_nulls_with: 0
+
+  - name: collective_window
+    label: "Collective window"
+    description: Testing window
+    type: simple
+    type_params:
+      measure:
+        name: years_tenure
+        filter: "{{ Dimension('id__loves_dbt') }} is true"
+      window: 14 days
+
+  - name: average_tenure
+    label: Average Tenure
+    description: The average tenure of our people
+    type: ratio
+    type_params:
+      numerator: collective_tenure
+      denominator: number_of_people
+
+  - name: average_tenure_minus_people
+    label: Average Tenure minus People
+    description: Well this isn't really useful is it?
+    type: derived
+    type_params:
+      expr: average_tenure - number_of_people
+      metrics:
+        - average_tenure
+        - number_of_people
+
+"""
+
+models_people_metrics_meta_top_yml = """
+version: 2
+
+metrics:
+
+  - name: number_of_people
+    label: "Number of people"
+    description: Total count of people
+    type: simple
+    type_params:
+      measure: people
+    meta:
+        my_meta_top: 'top'
+
+  - name: collective_tenure
+    label: "Collective tenure"
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: years_tenure
+        filter: "{{ Dimension('id__loves_dbt') }} is true"
+        join_to_timespine: true
+        fill_nulls_with: 0
 
   - name: collective_window
     label: "Collective window"
@@ -395,6 +462,8 @@ semantic_models:
     dimensions:
       - name: purchased_at
         type: TIME
+        type_params:
+          time_granularity: day
     entities:
       - name: purchase
         type: primary
@@ -427,6 +496,16 @@ metrics:
           name: sum_order_revenue
         denominator:
           name: count_orders
+
+    - name: sum_order_revenue_plus_one_custom_offset_window
+      label: "Total order revenue, plus 1 with custom offset window"
+      description: "The total order revenue plus 1 offset by 1 martian day"
+      type: derived
+      type_params:
+        metrics:
+          - name: sum_order_revenue
+            offset_window: 1 martian_day
+        expr: "sum_order_revenue + 1"
 """
 
 disabled_metric_level_schema_yml = """
@@ -444,6 +523,34 @@ metrics:
       enabled: False
     meta:
         my_meta: 'testing'
+
+  - name: collective_tenure
+    label: "Collective tenure"
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: years_tenure
+        filter: "{{ Dimension('id__loves_dbt') }} is true"
+
+"""
+
+meta_metric_level_schema_yml = """
+version: 2
+
+metrics:
+
+  - name: number_of_people
+    label: "Number of people"
+    description: Total count of people
+    type: simple
+    type_params:
+      measure: people
+    config:
+      meta:
+         my_meta_config: 'config
+    meta:
+        my_meta_direct: 'direct'
 
   - name: collective_tenure
     label: "Collective tenure"
@@ -623,4 +730,214 @@ metrics:
       - loves_dbt
     meta:
         my_meta: 'testing'
+"""
+
+conversion_semantic_model_purchasing_yml = """
+version: 2
+
+semantic_models:
+  - name: semantic_purchasing
+    model: ref('purchasing')
+    measures:
+      - name: num_orders
+        agg: COUNT
+        expr: purchased_at
+      - name: num_visits
+        agg: SUM
+        expr: 1
+    dimensions:
+      - name: purchased_at
+        type: TIME
+        type_params:
+          time_granularity: day
+    entities:
+      - name: purchase
+        type: primary
+        expr: '1'
+    defaults:
+      agg_time_dimension: purchased_at
+
+"""
+
+cumulative_metric_yml = """
+version: 2
+metrics:
+    - name: weekly_visits
+      label: Rolling sum of visits over the last 7 days
+      type: cumulative
+      type_params:
+        measure: num_visits
+        cumulative_type_params:
+          window: 7 days
+          period_agg: average
+    - name: cumulative_orders
+      label: Rolling total of orders (all time)
+      type: cumulative
+      type_params:
+        measure: num_orders
+        cumulative_type_params:
+          period_agg: last
+    - name: orders_ytd
+      label: Total orders since the start of the year
+      type: cumulative
+      type_params:
+        measure: num_orders
+        cumulative_type_params:
+          grain_to_date: year
+          period_agg: first
+    - name: monthly_orders
+      label: Orders in the past month
+      type: cumulative
+      type_params:
+        measure: num_orders
+        window: 1 month
+        cumulative_type_params:
+          period_agg: average
+    - name: yearly_orders
+      label: Orders in the past year
+      type: cumulative
+      type_params:
+        measure: num_orders
+        window: 1 year
+    - name: visits_mtd
+      label: Visits since start of month
+      type: cumulative
+      type_params:
+        measure: num_visits
+        grain_to_date: month
+    - name: cumulative_visits
+      label: Rolling total of visits (all time)
+      type: cumulative
+      type_params:
+        measure: num_visits
+    # TODO: Re-enable this when custom grain is supported for this type
+    # - name: visits_martian_day
+    #   label: Visits since start of martian_day
+    #   type: cumulative
+    #   type_params:
+    #     measure: num_visits
+    #     cumulative_type_params:
+    #       grain_to_date: martian_day
+    # - name: visits_martian_day_window
+    #   label: Visits since start of martian_day window
+    #   type: cumulative
+    #   type_params:
+    #     measure: num_visits
+    #     cumulative_type_params:
+    #       window: 1 martian_day
+"""
+
+conversion_metric_yml = """
+version: 2
+metrics:
+    - name: converted_orders_over_visits
+      label: Number of orders converted from visits
+      type: conversion
+      type_params:
+        conversion_type_params:
+          base_measure: num_visits
+          conversion_measure: num_orders
+          entity: purchase
+    - name: converted_orders_over_visits_with_window
+      label: Number of orders converted from visits with window
+      type: conversion
+      type_params:
+        conversion_type_params:
+          base_measure: num_visits
+          conversion_measure: num_orders
+          entity: purchase
+          window: 4 day
+    # TODO: Re-enable this when custom grain is supported for this type
+    # - name: converted_orders_over_visits_with_custom_window
+    #   label: Number of orders converted from visits with custom window
+    #   type: conversion
+    #   type_params:
+    #     conversion_type_params:
+    #       base_measure: num_visits
+    #       conversion_measure: num_orders
+    #       entity: purchase
+    #       window: 4 martian_day
+"""
+
+filtered_metrics_yml = """
+version: 2
+
+metrics:
+
+  - name: collective_tenure_measure_filter_str
+    label: "Collective tenure1"
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: "years_tenure"
+        filter: "{{ Dimension('id__loves_dbt') }} is true"
+
+  - name: collective_tenure_measure_filter_list
+    label: "Collective tenure2"
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: "years_tenure"
+        filter:
+          - "{{ Dimension('id__loves_dbt') }} is true"
+
+  - name: collective_tenure_metric_filter_str
+    label: Collective tenure3
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: "years_tenure"
+    filter: "{{ Dimension('id__loves_dbt') }} is true"
+
+  - name: collective_tenure_metric_filter_list
+    label: Collective tenure4
+    description: Total number of years of team experience
+    type: simple
+    type_params:
+      measure:
+        name: "years_tenure"
+    filter:
+      - "{{ Dimension('id__loves_dbt') }} is true"
+
+  - name: average_tenure_filter_str
+    label: Average tenure of people who love dbt1
+    description: Average tenure of people who love dbt
+    type: derived
+    type_params:
+      expr: "average_tenure"
+      metrics:
+        - name: average_tenure
+          filter: "{{ Dimension('id__loves_dbt') }} is true"
+
+  - name: average_tenure_filter_list
+    label: Average tenure of people who love dbt2
+    description: Average tenure of people who love dbt
+    type: derived
+    type_params:
+      expr: "average_tenure"
+      metrics:
+        - name: average_tenure
+          filter:
+            - "{{ Dimension('id__loves_dbt') }} is true"
+"""
+
+duplicate_measure_metric_yml = """
+metrics:
+  # Simple metrics
+  - name: people_with_tenure
+    description: "Count of people with tenure"
+    type: simple
+    label: People with tenure
+    type_params:
+      measure: people
+  - name: ratio_tenure_to_people
+    description: People to years of tenure
+    label: New customers to all customers
+    type: ratio
+    type_params:
+      numerator: people_with_tenure
+      denominator: number_of_people
 """

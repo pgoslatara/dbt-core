@@ -24,8 +24,10 @@
 //!         base_location_subpath: <string>                         # optional
 //!
 //!   # type: glue
-//!   # supported platforms: snowflake, duckdb
-//!   # at least one supported platform block is required
+//!   # supported platforms: snowflake
+//!   # a snowflake config block is required
+//!   # (DuckDB Glue/S3 Tables support lands in a follow-up PR once it can be
+//!   # live-validated on duckdb 1.5.4 / duckdb-iceberg#1017)
 //!   - name: glue_catalog
 //!     type: glue
 //!     table_format: iceberg
@@ -36,24 +38,11 @@
 //!         max_data_extension_time_in_days: <u32 in 0..=90>        # optional
 //!         target_file_size: AUTO|16MB|32MB|64MB|128MB             # optional
 //!         iceberg_version: <u32>                                  # optional, e.g. 3 for Iceberg V3
-//!       duckdb:
-//!         endpoint|endpoint_type: <string>                        # exactly one required
-//!         warehouse: <string>                                     # optional, non-empty if present
-//!         secret: <string>                                        # optional DuckDB secret name from profiles.yml
-//!         attach_as: <string>                                     # optional, non-empty if present
-//!         default_region: <string>                                # optional, non-empty if present
-//!         default_schema: <string>                                # optional, non-empty if present
-//!         max_table_staleness: <string>                           # optional, non-empty if present
-//!         authorization_type: OAUTH2|SIGV4|NONE                   # optional
-//!         access_delegation_mode: VENDED_CREDENTIALS|NONE         # optional
-//!         support_nested_namespaces: <boolean>                    # optional
-//!         support_stage_create: <boolean>                         # optional
-//!         purge_requested: <boolean>                              # optional
-//!         encode_entire_prefix: <boolean>                         # optional
 //!
 //!   # type: unity
 //!   # supported platforms: snowflake, databricks
 //!   # at least one supported platform block is required
+//!   # (DuckDB Unity support is gated on duckdb-iceberg#1017)
 //!   - name: unity_catalog
 //!     type: unity
 //!     table_format: iceberg
@@ -68,7 +57,7 @@
 //!         file_format: delta                                      # required if databricks block exists
 //!         location_root: <path string>                            # optional, non-empty if present
 //!         use_uniform: <boolean>                                  # optional, defaults to false
-//!         # Both managed and UniForm paths currently use delta.
+//!         # Managed external paths use parquet; UniForm paths use delta.
 //!
 //!   # type: hive_metastore
 //!   # supported platforms: databricks
@@ -105,19 +94,20 @@
 //!         max_data_extension_time_in_days: <u32 in 0..=90>        # optional
 //!         target_file_size: AUTO|16MB|32MB|64MB|128MB             # optional
 //!       duckdb:
-//!         endpoint|endpoint_type: <string>                        # exactly one required
+//!         endpoint: <string>                                      # required, non-empty
 //!         warehouse: <string>                                     # optional, non-empty if present
 //!         secret: <string>                                        # optional DuckDB secret name from profiles.yml
 //!         attach_as: <string>                                     # optional, non-empty if present
-//!         default_region: <string>                                # optional, non-empty if present
 //!         default_schema: <string>                                # optional, non-empty if present
 //!         max_table_staleness: <string>                           # optional, non-empty if present
 //!         authorization_type: OAUTH2|SIGV4|NONE                   # optional
 //!         access_delegation_mode: VENDED_CREDENTIALS|NONE         # optional
 //!         support_nested_namespaces: <boolean>                    # optional
-//!         support_stage_create: <boolean>                         # optional
 //!         purge_requested: <boolean>                              # optional
 //!         encode_entire_prefix: <boolean>                         # optional
+//!         read_only: <boolean>                                    # optional, defaults to false (read-write)
+//!         # region comes from the DuckDB secret; write-compat options
+//!         # (stage_create_tables, etc.) require duckdb 1.5.4 / duckdb-iceberg#1017
 //!
 //!   # type: ducklake
 //!   # supported platforms: duckdb
@@ -684,47 +674,83 @@ const DUCKLAKE_DUCKDB_KEYS: &[&str] = &[
 
 const LOCAL_FILESYSTEM_DUCKDB_KEYS: &[&str] = &["root_path", "file_format"];
 
+// NOTE: `default_region` and the write-compat options (stage_create_tables,
+// disable_multi_table_commit, skip_create_table_metadata_updates,
+// remove_files_on_delete) only exist in duckdb-iceberg #1017 (duckdb 1.5.4);
+// official 1.5.3 rejects them. They return in the stacked Iceberg-REST PR.
 const DUCKDB_KEYS: &[&str] = &[
     "endpoint",
-    "endpoint_type",
     "warehouse",
     "secret",
     "attach_as",
-    "default_region",
     "default_schema",
     "max_table_staleness",
     "authorization_type",
     "access_delegation_mode",
     "support_nested_namespaces",
-    "support_stage_create",
     "purge_requested",
     "encode_entire_prefix",
+    "read_only",
 ];
 
 fn validate_platform_support(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
     let catalog_platforms = match catalog.catalog_type {
-        V2CatalogType::Horizon => &["snowflake"][..],
-        V2CatalogType::Glue => &["snowflake", "duckdb"],
+        // Horizon/Unity on duckdb attach read-only on released duckdb; their
+        // write path needs duckdb 1.5.4 / duckdb-iceberg#1017 (gated to #10950).
+        V2CatalogType::Horizon => &["snowflake", "duckdb"][..],
+        V2CatalogType::Glue => &["snowflake"],
         V2CatalogType::IcebergRest => &["snowflake", "duckdb"],
-        V2CatalogType::Unity => &["snowflake", "databricks"],
+        V2CatalogType::Unity => &["snowflake", "databricks", "duckdb"],
         V2CatalogType::HiveMetastore => &["databricks"],
         V2CatalogType::BiglakeMetastore => &["bigquery"],
         V2CatalogType::DuckLake => &["duckdb"],
         V2CatalogType::LocalFilesystem => &["duckdb"],
     };
 
+    // Reject any config block that this catalog type does not support.
     for &platform in ALL_V2_PLATFORMS {
         if catalog.config_block(platform).is_some() && !catalog_platforms.contains(&platform) {
             return err!(
                 code => ErrorCode::InvalidConfig,
                 hacky_yml_loc => catalog.field_span("type").cloned(),
-                "dbt does not support {} on the {} 'type'",
+                "Catalog '{}' (type '{}') does not support a '{}' config block; valid config blocks are: {}",
+                catalog.name,
+                catalog.catalog_type.as_str(),
                 platform,
-                catalog.catalog_type.as_str()
+                catalog_platforms.join(", ")
             );
         }
     }
+
+    // Require at least one supported config block.
+    let has_supported_config = catalog_platforms
+        .iter()
+        .any(|&platform| catalog.config_block(platform).is_some());
+    if !has_supported_config {
+        return err!(
+            code => ErrorCode::InvalidConfig,
+            hacky_yml_loc => catalog.field_span("type").cloned(),
+            "Catalog '{}' of type '{}' requires at least one config block: {}",
+            catalog.name,
+            catalog.catalog_type.as_str(),
+            format_config_block_choices(catalog_platforms)
+        );
+    }
     Ok(())
+}
+
+fn format_config_block_choices(platforms: &[&str]) -> String {
+    match platforms {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [first, second] => format!("{first} or {second}"),
+        _ => {
+            let mut choices = platforms[..platforms.len() - 1].join(", ");
+            choices.push_str(", or ");
+            choices.push_str(platforms[platforms.len() - 1]);
+            choices
+        }
+    }
 }
 
 fn validate_u32_range(map: &yml::Mapping, field: &str, max: u32) -> FsResult<()> {
@@ -742,8 +768,28 @@ fn validate_u32_range(map: &yml::Mapping, field: &str, max: u32) -> FsResult<()>
     Ok(())
 }
 
+/// Horizon/Unity duckdb catalogs are read-only on released duckdb — their write
+/// path needs duckdb 1.5.4 / duckdb-iceberg#1017 (gated to #10950). Reject
+/// `read_only: false` so users get a clear config error rather than a runtime
+/// write failure. (Unset defaults to read-only at attach time.)
+fn forbid_duckdb_writes(
+    duckdb: &yml::Mapping,
+    catalog: &CatalogSpecV2View<'_>,
+    type_name: &str,
+) -> FsResult<()> {
+    if let Some(false) = try_get_bool(duckdb, "read_only")? {
+        return err!(
+            code => ErrorCode::InvalidConfig,
+            hacky_yml_loc => field_span(duckdb, "read_only").cloned(),
+            "Catalog '{}' {}/duckdb is read-only on released duckdb; writes ('read_only: false') require duckdb 1.5.4 (see #10950). Remove 'read_only' or set it to true.",
+            catalog.name,
+            type_name
+        );
+    }
+    Ok(())
+}
+
 fn parse_horizon_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Iceberg {
         return err!(
             code => ErrorCode::InvalidConfig,
@@ -752,67 +798,76 @@ fn parse_horizon_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
             catalog.name
         );
     }
-    let Some(snowflake) = catalog.config_block("snowflake") else {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => catalog.field_span("type").cloned(),
-            "Catalog '{}' type 'horizon' requires config.snowflake",
-            catalog.name
-        );
-    };
-    if field_span(snowflake, "base_location_subpath").is_some() {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => field_span(snowflake, "base_location_subpath").cloned(),
-            "Catalog '{}' horizon/snowflake base_location_subpath is model-config only and may not be specified in catalogs.yml",
-            catalog.name
-        );
-    }
-    check_unknown_keys(
-        snowflake,
-        SNOWFLAKE_MANAGED_SNOWFLAKE_KEYS,
-        "catalogs[].config.snowflake (horizon)",
-    )?;
+    let snowflake = catalog.config_block("snowflake");
 
-    let Some(external_volume) = get_str(snowflake, "external_volume")? else {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => catalog.field_span("type").cloned(),
-            "Catalog '{}' horizon/snowflake config requires 'external_volume'",
-            catalog.name
-        );
-    };
-    if external_volume.is_empty_or_whitespace() {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => field_span(snowflake, "external_volume").cloned(),
-            "Catalog '{}' horizon/snowflake 'external_volume' must be non-empty",
-            catalog.name
-        );
+    if let Some(snowflake) = snowflake {
+        if field_span(snowflake, "base_location_subpath").is_some() {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => field_span(snowflake, "base_location_subpath").cloned(),
+                "Catalog '{}' horizon/snowflake base_location_subpath is model-config only and may not be specified in catalogs.yml",
+                catalog.name
+            );
+        }
+        check_unknown_keys(
+            snowflake,
+            SNOWFLAKE_MANAGED_SNOWFLAKE_KEYS,
+            "catalogs[].config.snowflake (horizon)",
+        )?;
+
+        let Some(external_volume) = get_str(snowflake, "external_volume")? else {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => catalog.field_span("type").cloned(),
+                "Catalog '{}' horizon/snowflake config requires 'external_volume'",
+                catalog.name
+            );
+        };
+        if external_volume.is_empty_or_whitespace() {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => field_span(snowflake, "external_volume").cloned(),
+                "Catalog '{}' horizon/snowflake 'external_volume' must be non-empty",
+                catalog.name
+            );
+        }
+        if let Some(base_location_root) = get_str(snowflake, "base_location_root")?
+            && base_location_root.is_empty_or_whitespace()
+        {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => field_span(snowflake, "base_location_root").cloned(),
+                "Catalog '{}' horizon/snowflake base_location_root cannot be blank",
+                catalog.name
+            );
+        }
+        if let Some(policy) = get_str(snowflake, "storage_serialization_policy")?
+            && !is_valid_storage_serialization_policy(policy)
+        {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => field_span(snowflake, "storage_serialization_policy").cloned(),
+                "storage_serialization_policy '{}' invalid (COMPATIBLE|OPTIMIZED)",
+                policy
+            );
+        }
+        validate_u32_range(snowflake, "data_retention_time_in_days", 90)?;
+        validate_u32_range(snowflake, "max_data_extension_time_in_days", 90)?;
+        validate_optional_bool(snowflake, "change_tracking")?;
     }
-    if let Some(base_location_root) = get_str(snowflake, "base_location_root")?
-        && base_location_root.is_empty_or_whitespace()
-    {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => field_span(snowflake, "base_location_root").cloned(),
-            "Catalog '{}' horizon/snowflake base_location_root cannot be blank",
-            catalog.name
-        );
+
+    if let Some(duckdb) = catalog.config_block("duckdb") {
+        validate_duckdb_config(duckdb, catalog, "horizon")?;
+        if get_str(duckdb, "warehouse")?.is_none() {
+            return err!(
+                code => ErrorCode::InvalidConfig,
+                hacky_yml_loc => catalog.field_span("type").cloned(),
+                "Catalog '{}' horizon/duckdb config requires 'warehouse'",
+                catalog.name
+            );
+        }
+        forbid_duckdb_writes(duckdb, catalog, "horizon")?;
     }
-    if let Some(policy) = get_str(snowflake, "storage_serialization_policy")?
-        && !is_valid_storage_serialization_policy(policy)
-    {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => field_span(snowflake, "storage_serialization_policy").cloned(),
-            "storage_serialization_policy '{}' invalid (COMPATIBLE|OPTIMIZED)",
-            policy
-        );
-    }
-    validate_u32_range(snowflake, "data_retention_time_in_days", 90)?;
-    validate_u32_range(snowflake, "max_data_extension_time_in_days", 90)?;
-    validate_optional_bool(snowflake, "change_tracking")?;
 
     Ok(())
 }
@@ -828,30 +883,18 @@ fn validate_duckdb_config(
         &format!("catalogs[].config.duckdb ({})", type_name),
     )?;
 
-    let has_endpoint = get_str(duckdb, "endpoint")?;
-    let has_endpoint_type = get_str(duckdb, "endpoint_type")?;
-
-    // endpoint and endpoint_type are mutually exclusive; exactly one is required
-    match (has_endpoint, has_endpoint_type) {
-        (None, None) => {
+    // iceberg_rest catalogs require a non-empty REST `endpoint` URL.
+    match get_str(duckdb, "endpoint")? {
+        None => {
             return err!(
                 code => ErrorCode::InvalidConfig,
                 hacky_yml_loc => catalog.field_span("type").cloned(),
-                "Catalog '{}' {}/duckdb config requires 'endpoint' or 'endpoint_type'",
+                "Catalog '{}' {}/duckdb config requires 'endpoint'",
                 catalog.name,
                 type_name
             );
         }
-        (Some(ep), Some(_)) if !ep.is_empty_or_whitespace() => {
-            return err!(
-                code => ErrorCode::InvalidConfig,
-                hacky_yml_loc => field_span(duckdb, "endpoint_type").cloned(),
-                "Catalog '{}' {}/duckdb 'endpoint' and 'endpoint_type' are mutually exclusive",
-                catalog.name,
-                type_name
-            );
-        }
-        (Some(ep), _) if ep.is_empty_or_whitespace() => {
+        Some(ep) if ep.is_empty_or_whitespace() => {
             return err!(
                 code => ErrorCode::InvalidConfig,
                 hacky_yml_loc => field_span(duckdb, "endpoint").cloned(),
@@ -859,38 +902,6 @@ fn validate_duckdb_config(
                 catalog.name,
                 type_name
             );
-        }
-        (_, Some(et)) => {
-            let val = et.trim();
-            if !val.eq_ignore_ascii_case("GLUE") && !val.eq_ignore_ascii_case("S3_TABLES") {
-                return err!(
-                    code => ErrorCode::InvalidConfig,
-                    hacky_yml_loc => field_span(duckdb, "endpoint_type").cloned(),
-                    "Catalog '{}' {}/duckdb 'endpoint_type' must be 'GLUE' or 'S3_TABLES'",
-                    catalog.name,
-                    type_name
-                );
-            }
-            if val.eq_ignore_ascii_case("S3_TABLES") {
-                let Some(warehouse) = get_str(duckdb, "warehouse")? else {
-                    return err!(
-                        code => ErrorCode::InvalidConfig,
-                        hacky_yml_loc => field_span(duckdb, "endpoint_type").cloned(),
-                        "Catalog '{}' {}/duckdb endpoint_type='S3_TABLES' requires 'warehouse'",
-                        catalog.name,
-                        type_name
-                    );
-                };
-                if warehouse.is_empty_or_whitespace() {
-                    return err!(
-                        code => ErrorCode::InvalidConfig,
-                        hacky_yml_loc => field_span(duckdb, "warehouse").cloned(),
-                        "Catalog '{}' {}/duckdb 'warehouse' must be non-empty",
-                        catalog.name,
-                        type_name
-                    );
-                }
-            }
         }
         _ => {}
     }
@@ -900,7 +911,6 @@ fn validate_duckdb_config(
         "warehouse",
         "secret",
         "attach_as",
-        "default_region",
         "default_schema",
         "max_table_staleness",
     ] {
@@ -920,15 +930,6 @@ fn validate_duckdb_config(
 
     // authorization_type: constrained enum
     if let Some(auth_type) = get_str(duckdb, "authorization_type")? {
-        if has_endpoint_type.is_some() {
-            return err!(
-                code => ErrorCode::InvalidConfig,
-                hacky_yml_loc => field_span(duckdb, "authorization_type").cloned(),
-                "Catalog '{}' {}/duckdb 'authorization_type' cannot be combined with 'endpoint_type'",
-                catalog.name,
-                type_name
-            );
-        }
         let val = auth_type.trim();
         if !val.eq_ignore_ascii_case("OAUTH2")
             && !val.eq_ignore_ascii_case("SIGV4")
@@ -960,9 +961,9 @@ fn validate_duckdb_config(
 
     for key in [
         "support_nested_namespaces",
-        "support_stage_create",
         "purge_requested",
         "encode_entire_prefix",
+        "read_only",
     ] {
         validate_optional_bool(duckdb, key)?;
     }
@@ -971,21 +972,11 @@ fn validate_duckdb_config(
 }
 
 fn parse_glue_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Iceberg {
         return err!(
             code => ErrorCode::InvalidConfig,
             hacky_yml_loc => catalog.field_span("table_format").cloned(),
             "Catalog '{}' type 'glue' requires table_format='iceberg'",
-            catalog.name
-        );
-    }
-
-    if catalog.config_block("snowflake").is_none() && catalog.config_block("duckdb").is_none() {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => catalog.field_span("type").cloned(),
-            "Catalog '{}' of type 'glue' requires at least one config block: snowflake or duckdb",
             catalog.name
         );
     }
@@ -1027,29 +1018,15 @@ fn parse_glue_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
         validate_optional_bool(snowflake, "auto_refresh")?;
     }
 
-    if let Some(duckdb) = catalog.config_block("duckdb") {
-        validate_duckdb_config(duckdb, catalog, "glue")?;
-    }
-
     Ok(())
 }
 
 fn parse_linked_catalog(catalog: &CatalogSpecV2View<'_>, type_name: &str) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Iceberg {
         return err!(
             code => ErrorCode::InvalidConfig,
             hacky_yml_loc => catalog.field_span("table_format").cloned(),
             "Catalog '{}' type '{}' requires table_format='iceberg'",
-            catalog.name,
-            type_name
-        );
-    }
-    if catalog.config_block("snowflake").is_none() && catalog.config_block("databricks").is_none() {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => catalog.field_span("type").cloned(),
-            "Catalog '{}' of type '{}' requires at least one config block: snowflake or databricks",
             catalog.name,
             type_name
         );
@@ -1152,11 +1129,15 @@ fn parse_linked_catalog(catalog: &CatalogSpecV2View<'_>, type_name: &str) -> FsR
         }
     }
 
+    if let Some(duckdb) = catalog.config_block("duckdb") {
+        validate_duckdb_config(duckdb, catalog, type_name)?;
+        forbid_duckdb_writes(duckdb, catalog, type_name)?;
+    }
+
     Ok(())
 }
 
 fn parse_hive_metastore_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Default {
         return err!(
             code => ErrorCode::InvalidConfig,
@@ -1201,7 +1182,6 @@ fn parse_hive_metastore_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()>
 }
 
 fn parse_biglake_metastore_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Iceberg {
         return err!(
             code => ErrorCode::InvalidConfig,
@@ -1290,21 +1270,11 @@ fn parse_biglake_metastore_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<
 }
 
 fn parse_iceberg_rest_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Iceberg {
         return err!(
             code => ErrorCode::InvalidConfig,
             hacky_yml_loc => catalog.field_span("table_format").cloned(),
             "Catalog '{}' type 'iceberg_rest' requires table_format='iceberg'",
-            catalog.name
-        );
-    }
-
-    if catalog.config_block("snowflake").is_none() && catalog.config_block("duckdb").is_none() {
-        return err!(
-            code => ErrorCode::InvalidConfig,
-            hacky_yml_loc => catalog.field_span("type").cloned(),
-            "Catalog '{}' of type 'iceberg_rest' requires at least one config block: snowflake or duckdb",
             catalog.name
         );
     }
@@ -1353,7 +1323,6 @@ fn parse_iceberg_rest_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
 }
 
 fn parse_ducklake_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Default {
         return err!(
             code => ErrorCode::InvalidConfig,
@@ -1417,7 +1386,6 @@ fn parse_ducklake_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
 }
 
 fn parse_local_filesystem_catalog(catalog: &CatalogSpecV2View<'_>) -> FsResult<()> {
-    validate_platform_support(catalog)?;
     if catalog.table_format != V2TableFormat::Default {
         return err!(
             code => ErrorCode::InvalidConfig,
@@ -1479,6 +1447,7 @@ fn is_valid_duckdb_file_format(v: &str) -> bool {
 
 pub fn validate_catalogs_v2(spec: &DbtCatalogsV2View<'_>, _path: &Path) -> FsResult<()> {
     for catalog in &spec.catalogs {
+        validate_platform_support(catalog)?;
         let () = match catalog.catalog_type {
             V2CatalogType::Horizon => parse_horizon_catalog(catalog)?,
             V2CatalogType::Glue => parse_glue_catalog(catalog)?,
@@ -1626,7 +1595,8 @@ catalogs:
         let res = parse_and_validate(yaml);
         assert!(res.is_err(), "expected error");
         assert!(
-            format!("{res:?}").contains("does not support databricks on the iceberg_rest"),
+            format!("{res:?}")
+                .contains("(type 'iceberg_rest') does not support a 'databricks' config block"),
             "unexpected error: {res:?}"
         );
     }
@@ -1697,6 +1667,24 @@ iceberg_catalogs:
     }
 
     #[test]
+    fn v2_rejects_missing_supported_platform_block() {
+        let yaml = r#"
+catalogs:
+  - name: linked_catalog
+    type: unity
+    table_format: iceberg
+    config: {}
+"#;
+        let res = parse_and_validate(yaml);
+        let msg = format!("{res:?}");
+        assert!(res.is_err(), "expected error but got Ok");
+        assert!(
+            msg.contains("requires at least one config block"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
     fn unity_rejects_bigquery_block_in_config() {
         let yaml = r#"
 catalogs:
@@ -1714,7 +1702,7 @@ catalogs:
         let msg = format!("{res:?}");
         assert!(res.is_err(), "expected error but got Ok");
         assert!(
-            msg.contains("does not support bigquery on the unity"),
+            msg.contains("(type 'unity') does not support a 'bigquery' config block"),
             "unexpected error: {msg}"
         );
     }
@@ -1735,7 +1723,7 @@ catalogs:
         let msg = format!("{res:?}");
         assert!(res.is_err(), "expected error but got Ok");
         assert!(
-            msg.contains("does not support bigquery on the horizon"),
+            msg.contains("(type 'horizon') does not support a 'bigquery' config block"),
             "unexpected error: {msg}"
         );
     }
@@ -1944,7 +1932,9 @@ catalogs:
     // ===== DuckDB + IcebergRest tests =====
 
     #[test]
-    fn glue_duckdb_v2_valid() {
+    fn glue_duckdb_v2_rejected() {
+        // Glue (S3 Tables) on DuckDB is AWS-managed storage, gated out of the v2
+        // base alongside Horizon pending duckdb-iceberg#1017.
         let yaml = r#"
 catalogs:
   - name: glue_duck
@@ -1954,7 +1944,12 @@ catalogs:
       duckdb:
         endpoint: "https://glue.us-east-1.amazonaws.com"
 "#;
-        parse_and_validate(yaml).expect("glue + duckdb should validate");
+        let res = parse_and_validate(yaml);
+        assert!(res.is_err(), "expected glue + duckdb rejection");
+        assert!(
+            format!("{res:?}").contains("does not support a 'duckdb' config block"),
+            "unexpected: {res:?}"
+        );
     }
 
     #[test]
@@ -2083,136 +2078,6 @@ catalogs:
         );
     }
 
-    #[test]
-    fn unity_duckdb_v2_rejected() {
-        let yaml = r#"
-catalogs:
-  - name: unity_duck
-    type: unity
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint: "https://example.com"
-"#;
-        let res = parse_and_validate(yaml);
-        let msg = format!("{res:?}");
-        assert!(res.is_err(), "expected error but got Ok");
-        assert!(
-            msg.contains("does not support duckdb on the unity"),
-            "unexpected error: {msg}"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // DuckDB config: endpoint_type
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn duckdb_endpoint_type_glue_valid() {
-        let yaml = r#"
-catalogs:
-  - name: glue_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint_type: GLUE
-"#;
-        parse_and_validate(yaml).expect("endpoint_type=GLUE should validate");
-    }
-
-    #[test]
-    fn duckdb_endpoint_type_s3_tables_valid() {
-        let yaml = r#"
-catalogs:
-  - name: s3t_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint_type: S3_TABLES
-        warehouse: "arn:aws:s3tables:us-east-1:123456789012:bucket/example"
-"#;
-        parse_and_validate(yaml).expect("endpoint_type=S3_TABLES should validate");
-    }
-
-    #[test]
-    fn duckdb_endpoint_type_invalid_value() {
-        let yaml = r#"
-catalogs:
-  - name: bad_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint_type: INVALID
-"#;
-        let res = parse_and_validate(yaml);
-        assert!(res.is_err(), "expected error");
-        assert!(
-            format!("{res:?}").contains("'GLUE' or 'S3_TABLES'"),
-            "unexpected: {res:?}"
-        );
-    }
-
-    #[test]
-    fn duckdb_endpoint_and_endpoint_type_mutual_exclusion() {
-        let yaml = r#"
-catalogs:
-  - name: both_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint: "https://example.com"
-        endpoint_type: GLUE
-"#;
-        let res = parse_and_validate(yaml);
-        assert!(res.is_err(), "expected error");
-        assert!(
-            format!("{res:?}").contains("mutually exclusive"),
-            "unexpected: {res:?}"
-        );
-    }
-
-    #[test]
-    fn duckdb_s3_tables_endpoint_type_requires_warehouse() {
-        let yaml = r#"
-catalogs:
-  - name: s3t_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint_type: S3_TABLES
-"#;
-        let res = parse_and_validate(yaml);
-        assert!(res.is_err(), "expected error");
-        assert!(
-            format!("{res:?}").contains("requires 'warehouse'"),
-            "unexpected: {res:?}"
-        );
-    }
-
-    #[test]
-    fn duckdb_neither_endpoint_nor_endpoint_type() {
-        let yaml = r#"
-catalogs:
-  - name: empty_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        secret: "my_secret"
-"#;
-        let res = parse_and_validate(yaml);
-        assert!(res.is_err(), "expected error");
-        assert!(
-            format!("{res:?}").contains("'endpoint' or 'endpoint_type'"),
-            "unexpected: {res:?}"
-        );
-    }
-
     // -----------------------------------------------------------------------
     // DuckDB config: authorization_type, access_delegation_mode
     // -----------------------------------------------------------------------
@@ -2253,26 +2118,6 @@ catalogs:
         assert!(res.is_err(), "expected error");
         assert!(
             format!("{res:?}").contains("'OAUTH2', 'SIGV4', or 'NONE'"),
-            "unexpected: {res:?}"
-        );
-    }
-
-    #[test]
-    fn duckdb_authorization_type_cannot_combine_with_endpoint_type() {
-        let yaml = r#"
-catalogs:
-  - name: auth_cat
-    type: glue
-    table_format: iceberg
-    config:
-      duckdb:
-        endpoint_type: GLUE
-        authorization_type: SIGV4
-"#;
-        let res = parse_and_validate(yaml);
-        assert!(res.is_err(), "expected error");
-        assert!(
-            format!("{res:?}").contains("cannot be combined with 'endpoint_type'"),
             "unexpected: {res:?}"
         );
     }
@@ -2334,15 +2179,14 @@ catalogs:
         warehouse: "warehouse_name"
         secret: "my_secret"
         attach_as: "my_db"
-        default_region: "us-east-1"
         default_schema: "demo"
         max_table_staleness: "10 minutes"
         authorization_type: OAUTH2
         access_delegation_mode: VENDED_CREDENTIALS
         support_nested_namespaces: true
-        support_stage_create: false
         purge_requested: true
         encode_entire_prefix: true
+        read_only: false
 "#;
         parse_and_validate(yaml).expect("full config should validate");
     }
@@ -2377,12 +2221,12 @@ catalogs:
     config:
       duckdb:
         endpoint: "https://example.com"
-        support_stage_create: "yes"
+        stage_create_tables: "yes"
 "#;
         let res = parse_and_validate(yaml);
         assert!(res.is_err(), "expected error for non-boolean attach option");
         assert!(
-            format!("{res:?}").contains("support_stage_create"),
+            format!("{res:?}").contains("stage_create_tables"),
             "unexpected: {res:?}"
         );
     }
@@ -2515,7 +2359,7 @@ catalogs:
         let msg = format!("{res:?}");
         assert!(res.is_err(), "expected error but got Ok");
         assert!(
-            msg.contains("does not support snowflake on the ducklake"),
+            msg.contains("(type 'ducklake') does not support a 'snowflake' config block"),
             "unexpected error: {msg}"
         );
     }
@@ -2552,6 +2396,93 @@ catalogs:
         let msg = format!("{res:?}");
         assert!(res.is_err(), "expected error but got Ok");
         assert!(msg.contains("'root_path'"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn horizon_duckdb_v2_valid() {
+        let yaml = r#"
+catalogs:
+  - name: horizon_demo
+    type: horizon
+    table_format: iceberg
+    config:
+      duckdb:
+        warehouse: "horizon_wh"
+        endpoint: "https://horizon.example.com/catalog"
+        secret: "horizon_secret"
+        default_schema: "demo"
+"#;
+        parse_and_validate(yaml).expect("read-only horizon + duckdb should validate");
+    }
+
+    #[test]
+    fn unity_duckdb_v2_valid() {
+        let yaml = r#"
+catalogs:
+  - name: unity_demo
+    type: unity
+    table_format: iceberg
+    config:
+      duckdb:
+        warehouse: "unity_wh"
+        endpoint: "https://dbc.example.com/api/2.1/unity-catalog/iceberg"
+"#;
+        parse_and_validate(yaml).expect("read-only unity + duckdb should validate");
+    }
+
+    #[test]
+    fn horizon_duckdb_requires_warehouse() {
+        let yaml = r#"
+catalogs:
+  - name: horizon_demo
+    type: horizon
+    table_format: iceberg
+    config:
+      duckdb:
+        endpoint: "https://horizon.example.com/catalog"
+"#;
+        let res = parse_and_validate(yaml);
+        let msg = format!("{res:?}");
+        assert!(res.is_err(), "expected error but got Ok");
+        assert!(msg.contains("'warehouse'"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn horizon_duckdb_forbids_writes() {
+        let yaml = r#"
+catalogs:
+  - name: horizon_demo
+    type: horizon
+    table_format: iceberg
+    config:
+      duckdb:
+        warehouse: "horizon_wh"
+        endpoint: "https://horizon.example.com/catalog"
+        read_only: false
+"#;
+        let res = parse_and_validate(yaml);
+        let msg = format!("{res:?}");
+        assert!(res.is_err(), "expected error but got Ok");
+        assert!(msg.contains("read-only"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn unity_duckdb_forbids_writes() {
+        let yaml = r#"
+catalogs:
+  - name: unity_demo
+    type: unity
+    table_format: iceberg
+    config:
+      duckdb:
+        warehouse: "unity_wh"
+        endpoint: "https://dbc.example.com/api/2.1/unity-catalog/iceberg"
+        read_only: false
+"#;
+        let res = parse_and_validate(yaml);
+        let msg = format!("{res:?}");
+        assert!(res.is_err(), "expected error but got Ok");
+        assert!(msg.contains("read-only"), "unexpected error: {msg}");
     }
 
     #[test]
